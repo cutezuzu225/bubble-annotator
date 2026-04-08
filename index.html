@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>气泡标注工具</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- SheetJS for Excel export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+<div class="app">
+
+  <!-- ── 顶部工具栏 ── -->
+  <header class="topbar">
+    <div class="tb-left">
+      <div class="logo">⚙ 气泡标注</div>
+      <label class="btn btn-primary" for="file-input">
+        📂 打开图纸
+        <input id="file-input" type="file" accept=".jpg,.jpeg,.png,.pdf,.dxf,.dwg,.svg" hidden />
+      </label>
+      <span class="file-name" id="file-name">未选择文件</span>
+    </div>
+
+    <div class="tb-center">
+      <!-- 视图切换 -->
+      <div class="view-tabs">
+        <button class="view-tab" id="tab-original">原图</button>
+        <button class="view-tab active" id="tab-bubble">气泡图</button>
+      </div>
+      <!-- 图层显隐 -->
+      <label class="toggle-check"><input type="checkbox" id="show-bubbles" checked /> 气泡</label>
+      <label class="toggle-check"><input type="checkbox" id="show-values" checked /> 尺寸</label>
+      <label class="toggle-check"><input type="checkbox" id="show-borders" checked /> 边框</label>
+      <button class="btn btn-sm" id="btn-style">🎨 样式设置</button>
+    </div>
+
+    <div class="tb-right">
+      <!-- 缩放 -->
+      <div class="zoom-group">
+        <button class="btn btn-sm" id="btn-zoom-out">−</button>
+        <span id="zoom-label">100%</span>
+        <button class="btn btn-sm" id="btn-zoom-in">+</button>
+        <button class="btn btn-sm" id="btn-zoom-fit">适应</button>
+      </div>
+      <button class="btn btn-ai" id="btn-ai-analyze" disabled>🤖 AI 自动识别</button>
+      <button class="btn btn-orange" id="btn-manual-num" disabled>✏️ 自主编号</button>
+      <button class="btn btn-success" id="btn-export-excel" disabled>📊 导出 Excel</button>
+      <button class="btn btn-sm" id="btn-settings">⚙️ 设置</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- ── 左侧面板 ── -->
+    <aside class="left-panel">
+
+      <!-- 工作流 -->
+      <div class="workflow">
+        <div class="workflow-step" id="ws-0">
+          <div class="ws-circle">1</div>
+          <div class="ws-label">选择<br/>图纸文件</div>
+        </div>
+        <div class="ws-line"></div>
+        <div class="workflow-step" id="ws-1">
+          <div class="ws-circle">2</div>
+          <div class="ws-label">自动<br/>提取尺寸</div>
+        </div>
+        <div class="ws-line"></div>
+        <div class="workflow-step" id="ws-2">
+          <div class="ws-circle">3</div>
+          <div class="ws-label">生成<br/>气泡标注</div>
+        </div>
+        <div class="ws-line"></div>
+        <div class="workflow-step" id="ws-3">
+          <div class="ws-circle">4</div>
+          <div class="ws-label">核对<br/>修改标注</div>
+        </div>
+        <div class="ws-line"></div>
+        <div class="workflow-step" id="ws-4">
+          <div class="ws-circle">5</div>
+          <div class="ws-label">导出<br/>Excel报告</div>
+        </div>
+      </div>
+
+      <!-- 标注数据 -->
+      <div class="ann-section">
+        <div class="ann-header">
+          <span class="ann-title">标注数据</span>
+          <span class="ann-badge" id="ann-badge">自动编号</span>
+          <div class="ann-header-actions">
+            <button class="icon-btn" id="btn-sort-num" title="按编号排序">↕</button>
+            <button class="icon-btn" id="btn-delete-selected" title="删除选中">🗑</button>
+            <button class="icon-btn" id="btn-refresh-num" title="重新编号">🔄</button>
+            <button class="icon-btn" id="btn-export-excel2" title="导出 Excel">📊</button>
+          </div>
+        </div>
+
+        <div class="ann-table-wrap">
+          <table class="ann-table">
+            <thead>
+              <tr>
+                <th style="width:36px">#</th>
+                <th>标注值</th>
+                <th style="width:52px">上偏差</th>
+                <th style="width:52px">下偏差</th>
+                <th style="width:48px">类型</th>
+                <th style="width:36px"></th>
+              </tr>
+            </thead>
+            <tbody id="ann-tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="ann-footer">
+          <span>总计：<b id="total-count">0</b> 项</span>
+          <span>已编号：<b id="numbered-count">0</b> 个</span>
+        </div>
+
+        <div class="ann-actions">
+          <button class="ann-act-btn" id="btn-edit-sel" title="编辑选中">✏️</button>
+          <button class="ann-act-btn danger" id="btn-del-sel" title="删除选中">🗑</button>
+          <button class="ann-act-btn" id="btn-add-one" title="手动添加">➕</button>
+          <button class="ann-act-btn" id="btn-clear-all" title="清空全部">🧹</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── 画布区域 ── -->
+    <div class="canvas-area">
+      <div class="canvas-wrap" id="canvas-wrap">
+        <div class="canvas-inner" id="canvas-inner">
+          <div class="drop-hint" id="drop-hint">
+            <div class="drop-icon">📄</div>
+            <p>拖放图纸到此处<br/>或点击「打开图纸」</p>
+            <p class="sub">支持 JPG · PNG · PDF · DXF · DWG · SVG</p>
+          </div>
+          <img id="drawing-img" src="" alt="" draggable="false" />
+          <svg id="bubble-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── AI 加载遮罩 ── -->
+  <div class="overlay" id="ai-overlay" hidden>
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <p id="ai-status">正在分析图纸…</p>
+      <p class="hint">Claude 正在识别尺寸标注，请稍候</p>
+    </div>
+  </div>
+
+  <!-- ── 转换遮罩 ── -->
+  <div class="overlay" id="conv-overlay" hidden>
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <p id="conv-status">正在转换文件…</p>
+    </div>
+  </div>
+
+  <!-- ── 编辑标注弹窗 ── -->
+  <div class="modal-overlay" id="edit-overlay" hidden>
+    <div class="modal">
+      <h4>编辑标注 <span id="edit-num-label"></span></h4>
+      <div class="form-row">
+        <label>标注值<input id="edit-value" type="text" placeholder="如 Ø12H7、30±0.1" /></label>
+      </div>
+      <div class="form-row two-col">
+        <label>上偏差<input id="edit-upper" type="text" placeholder="+0.05" /></label>
+        <label>下偏差<input id="edit-lower" type="text" placeholder="-0.02" /></label>
+      </div>
+      <div class="form-row two-col">
+        <label>类型
+          <select id="edit-type">
+            <option value="直径">直径</option>
+            <option value="半径">半径</option>
+            <option value="尺寸">尺寸</option>
+            <option value="角度">角度</option>
+            <option value="粗糙度">粗糙度</option>
+            <option value="其他">其他</option>
+          </select>
+        </label>
+        <label>颜色<input id="edit-color" type="color" value="#3498db" /></label>
+      </div>
+      <div class="form-row">
+        <label>备注<input id="edit-remark" type="text" placeholder="可选" /></label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="edit-cancel">取消</button>
+        <button class="btn danger" id="edit-delete">删除</button>
+        <button class="btn btn-primary" id="edit-save">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 样式设置弹窗 ── -->
+  <div class="modal-overlay" id="style-overlay" hidden>
+    <div class="modal">
+      <h4>🎨 样式设置</h4>
+      <div class="form-row">
+        <label>气泡大小
+          <input id="sty-size" type="range" min="10" max="30" value="17" step="1" />
+          <span id="sty-size-val">17</span>
+        </label>
+      </div>
+      <div class="form-row">
+        <label>字体大小
+          <input id="sty-font" type="range" min="8" max="20" value="13" step="1" />
+          <span id="sty-font-val">13</span>
+        </label>
+      </div>
+      <div class="form-row">
+        <label>气泡透明度
+          <input id="sty-opacity" type="range" min="40" max="100" value="92" step="1" />
+          <span id="sty-opacity-val">92%</span>
+        </label>
+      </div>
+      <div class="form-row">
+        <label>显示引导线 <input id="sty-leader" type="checkbox" checked /></label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="style-close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── API 设置弹窗 ── -->
+  <div class="modal-overlay" id="settings-overlay" hidden>
+    <div class="modal settings-modal">
+      <h4>⚙️ AI 接口设置</h4>
+      <label>Provider
+        <select id="cfg-provider">
+          <option value="openai">OpenAI 兼容（OpenAI / 第三方）</option>
+          <option value="anthropic">Anthropic</option>
+        </select>
+      </label>
+      <label>API Base URL
+        <input id="cfg-base-url" type="text" placeholder="如 https://api.openai.com/v1，留空用默认" />
+        <span class="field-hint">OpenAI 兼容填 /v1 结尾；Anthropic 留空</span>
+      </label>
+      <label>API Key <span class="required">*</span>
+        <input id="cfg-api-key" type="password" placeholder="sk-..." autocomplete="off" />
+      </label>
+      <label>模型名称
+        <input id="cfg-model" type="text" placeholder="如 gpt-4o / claude-opus-4-6" />
+      </label>
+      <div class="settings-tip">💡 配置保存在浏览器本地，不上传到服务器</div>
+      <div class="connect-test-row">
+        <button class="btn btn-sm" id="btn-test-conn">🔌 检查连接</button>
+        <span id="test-result"></span>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="settings-cancel">取消</button>
+        <button class="btn btn-primary" id="settings-save">保存</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>

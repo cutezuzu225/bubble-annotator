@@ -1,0 +1,7 @@
+anthropic>=0.40.0
+openai>=1.30.0
+flask>=3.0.0
+flask-cors>=4.0.0
+ezdxf[draw]>=1.1.0
+matplotlib>=3.8.0
+cairosvg>=2.7.0
