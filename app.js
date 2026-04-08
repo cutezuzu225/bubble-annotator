@@ -546,27 +546,127 @@ $('btn-ai-analyze').addEventListener('click', async () => {
 });
 
 // ── 导出 Excel ────────────────────────────────────────────────────────────────
-function doExportExcel() {
-  if (!state.annotations.length) { alert('没有标注数据可导出'); return; }
-
-  const rows = [['序号', '标注值', '上偏差', '下偏差', '类型', '实测值', '判定', '备注']];
-  for (const ann of state.annotations) {
-    rows.push([ann.num, ann.value, ann.upper_tol, ann.lower_tol, ann.type, '', '', ann.remark]);
-  }
-
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-
-  // 设置列宽
-  ws['!cols'] = [{ wch: 6 }, { wch: 16 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 10 }, { wch: 8 }, { wch: 16 }];
-
-  XLSX.utils.book_append_sheet(wb, ws, '尺寸检测表');
-  XLSX.writeFile(wb, '尺寸检测表.xlsx');
-  setWorkflowStep(4);
+function getImageBase64() {
+  if (!drawingImg.src || !state.imgW) return null;
+  try {
+    const c = document.createElement('canvas');
+    c.width = state.imgW; c.height = state.imgH;
+    c.getContext('2d').drawImage(drawingImg, 0, 0);
+    const dataUrl = c.toDataURL('image/jpeg', 0.85);
+    return dataUrl.split(',')[1];
+  } catch { return null; }
 }
 
-$('btn-export-excel').addEventListener('click', doExportExcel);
-$('btn-export-excel2').addEventListener('click', doExportExcel);
+async function openExportModal() {
+  if (!state.annotations.length) { alert('没有标注数据可导出'); return; }
+  $('exp-date').value = new Date().toISOString().slice(0, 10);
+  $('export-overlay').hidden = false;
+
+  // 没有配置 API key 或没有图片，跳过 AI 识别
+  const cfg = loadConfig();
+  if (!cfg.api_key) return;
+  const imgB64 = getImageBase64();
+  if (!imgB64) return;
+
+  const hint = $('exp-ai-hint');
+  hint.hidden = false;
+
+  // 15 秒超时，防止请求挂起
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/extract-meta`, {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image_b64: imgB64,
+        media_type: 'image/jpeg',
+        provider: cfg.provider || 'openai',
+        base_url: cfg.base_url || '',
+        api_key:  cfg.api_key,
+        model:    cfg.model    || '',
+      })
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const meta = await resp.json();
+    // 只填入空字段，不覆盖用户已手动填写的内容
+    const map = { name:'exp-name', drawing:'exp-drawing', material:'exp-material',
+                  quantity:'exp-quantity', sample:'exp-sample', batch:'exp-batch' };
+    for (const [key, id] of Object.entries(map)) {
+      if (!$(id).value && meta[key]) $(id).value = meta[key];
+    }
+  } catch { /* 识别超时或失败，静默忽略 */ }
+  finally {
+    clearTimeout(timer);
+    hint.hidden = true;
+  }
+}
+
+function formatTol(ann) {
+  const u = (ann.upper_tol || '').trim();
+  const l = (ann.lower_tol || '').trim();
+  if (!u && !l) return '';
+  if (u === l) return u; // 完全相同直接显示
+  // 检查是否对称 ±
+  const uNum = parseFloat(u);
+  const lNum = parseFloat(l);
+  if (!isNaN(uNum) && !isNaN(lNum) && Math.abs(uNum) === Math.abs(lNum)) {
+    return `±${Math.abs(uNum)}`;
+  }
+  if (u && l) return `${u}/${l}`;
+  return u || l;
+}
+
+async function doExportExcel() {
+  const name      = $('exp-name').value.trim();
+  const drawing   = $('exp-drawing').value.trim();
+  const material  = $('exp-material').value.trim();
+  const quantity  = $('exp-quantity').value.trim();
+  const sample    = $('exp-sample').value.trim();
+  const batch     = $('exp-batch').value.trim();
+  const inspector = $('exp-inspector').value.trim();
+  const reviewer  = $('exp-reviewer').value.trim();
+  const date      = $('exp-date').value || new Date().toISOString().slice(0, 10);
+
+  $('export-overlay').hidden = true;
+  const btn = $('export-confirm');
+  btn.disabled = true;
+  btn.textContent = '生成中…';
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        annotations: state.annotations,
+        meta: { name, drawing, material, quantity, sample, batch, date, inspector, reviewer }
+      })
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+
+    const blob = await resp.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `林海日常检验记录_${date}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setWorkflowStep(4);
+  } catch (e) {
+    alert('导出失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '导出 Excel';
+  }
+}
+
+$('btn-export-excel').addEventListener('click', openExportModal);
+$('btn-export-excel2').addEventListener('click', openExportModal);
+
+$('export-cancel').addEventListener('click', () => { $('export-overlay').hidden = true; });
+$('export-confirm').addEventListener('click', doExportExcel);
 
 // ── API 设置面板 ──────────────────────────────────────────────────────────────
 $('btn-settings').addEventListener('click', () => {

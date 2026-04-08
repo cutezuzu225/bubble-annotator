@@ -224,6 +224,39 @@
     </div>
   </div>
 
+  <!-- ── 导出配置弹窗 ── -->
+  <div class="modal-overlay" id="export-overlay" hidden>
+    <div class="modal">
+      <h4>📋 导出检验记录</h4>
+      <div id="exp-ai-hint" class="exp-ai-hint" hidden>
+        <span class="exp-ai-spinner"></span> AI 识别中，可直接修改字段…
+      </div>
+      <div class="form-row two-col">
+        <label>名称<input id="exp-name" type="text" placeholder="零件名称" /></label>
+        <label>图号<input id="exp-drawing" type="text" placeholder="图纸编号" /></label>
+      </div>
+      <div class="form-row two-col">
+        <label>材质<input id="exp-material" type="text" placeholder="如 40Cr" /></label>
+        <label>数量<input id="exp-quantity" type="text" placeholder="件数" /></label>
+      </div>
+      <div class="form-row two-col">
+        <label>样品<input id="exp-sample" type="text" placeholder="样品编号" /></label>
+        <label>批量<input id="exp-batch" type="text" placeholder="批次号" /></label>
+      </div>
+      <div class="form-row two-col">
+        <label>检验员<input id="exp-inspector" type="text" placeholder="检验员姓名" /></label>
+        <label>审核<input id="exp-reviewer" type="text" placeholder="审核人姓名" /></label>
+      </div>
+      <div class="form-row">
+        <label>日期<input id="exp-date" type="date" /></label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="export-cancel">取消</button>
+        <button class="btn btn-primary" id="export-confirm">导出 Excel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── API 设置弹窗 ── -->
   <div class="modal-overlay" id="settings-overlay" hidden>
     <div class="modal settings-modal">

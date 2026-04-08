@@ -52,7 +52,7 @@ TYPE_COLORS = {
 }
 
 
-def call_openai_compatible(api_key, base_url, model, image_b64, media_type):
+def call_openai_compatible(api_key, base_url, model, image_b64, media_type, prompt=None):
     """调用 OpenAI 兼容接口（包括 OpenAI / Azure / 第三方）"""
     from openai import OpenAI
     client = OpenAI(api_key=api_key, base_url=base_url)
@@ -66,14 +66,14 @@ def call_openai_compatible(api_key, base_url, model, image_b64, media_type):
                     "type": "image_url",
                     "image_url": {"url": f"data:{media_type};base64,{image_b64}"},
                 },
-                {"type": "text", "text": ANALYZE_PROMPT},
+                {"type": "text", "text": prompt or ANALYZE_PROMPT},
             ],
         }],
     )
     return response.choices[0].message.content
 
 
-def call_anthropic(api_key, base_url, model, image_b64, media_type):
+def call_anthropic(api_key, base_url, model, image_b64, media_type, prompt=None):
     """调用 Anthropic API"""
     import anthropic
     kwargs = {"api_key": api_key}
@@ -94,7 +94,7 @@ def call_anthropic(api_key, base_url, model, image_b64, media_type):
                         "data": image_b64,
                     },
                 },
-                {"type": "text", "text": ANALYZE_PROMPT},
+                {"type": "text", "text": prompt or ANALYZE_PROMPT},
             ],
         }],
     )
@@ -301,6 +301,239 @@ def test_connection():
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 200
+
+
+@app.route("/api/extract-meta", methods=["POST"])
+def extract_meta():
+    """用 AI 从图片中提取图纸元信息（名称/图号/材质/数量/样品/批量）"""
+    data       = request.get_json()
+    image_b64  = data.get("image_b64", "")
+    media_type = data.get("media_type", "image/jpeg")
+    provider   = data.get("provider", "openai")
+    base_url   = data.get("base_url", "")
+    api_key    = data.get("api_key", "")
+    model      = data.get("model", "")
+
+    prompt = (
+        "请从这张工程图纸或检验记录中提取以下信息，以 JSON 格式返回，"
+        "字段名使用英文，值用图中原文：\n"
+        "- name: 零件/产品名称\n"
+        "- drawing: 图号或图纸编号\n"
+        "- material: 材质\n"
+        "- quantity: 数量（纯数字）\n"
+        "- sample: 样品编号（若无则空字符串）\n"
+        "- batch: 批量/批次号（若无则空字符串）\n\n"
+        "只返回 JSON 对象，不要任何说明文字。"
+    )
+
+    try:
+        if provider == "anthropic":
+            raw = call_anthropic(api_key, base_url, model, image_b64, media_type, prompt)
+        else:
+            raw = call_openai_compatible(api_key, base_url, model, image_b64, media_type, prompt)
+
+        # 从响应中提取 JSON
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if match:
+            meta = json.loads(match.group())
+        else:
+            meta = {}
+        return jsonify(meta)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/export", methods=["POST"])
+def export_excel():
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.page import PageMargins
+    from flask import send_file
+
+    data        = request.get_json()
+    annotations = data.get("annotations", [])
+    meta        = data.get("meta", {})
+    name        = meta.get("name", "")
+    drawing     = meta.get("drawing", "")
+    material    = meta.get("material", "")
+    quantity    = meta.get("quantity", "")
+    sample      = meta.get("sample", "")
+    batch       = meta.get("batch", "")
+    date        = meta.get("date", "")
+    inspector   = meta.get("inspector", "")
+    reviewer    = meta.get("reviewer",  "")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "日常检验记录"
+
+    # ── 基础样式 ──
+    THIN   = Side(style="thin")
+    MEDIUM = Side(style="medium")
+    T_BDR  = Border(left=THIN,   right=THIN,   top=THIN,   bottom=THIN)
+    M_BDR  = Border(left=MEDIUM, right=MEDIUM, top=MEDIUM, bottom=MEDIUM)
+    HDR_FILL = PatternFill("solid", fgColor="D9D9D9")
+    SONG = "宋体"
+
+    def sc(row, col, value="", bold=False, size=11,
+           ha="center", va="center", fill=None):
+        """Write and style a cell (border applied later in bulk)."""
+        c = ws.cell(row=row, column=col, value=value)
+        c.font      = Font(name=SONG, bold=bold, size=size)
+        c.alignment = Alignment(horizontal=ha, vertical=va, wrap_text=False)
+        if fill:
+            c.fill = fill
+        return c
+
+    def fill_border(r1, c1, r2, c2, bdr=None):
+        """Apply border to every cell in [r1:r2, c1:c2].
+        Uses thin by default. This ensures merged-cell edges are correct."""
+        b = bdr or T_BDR
+        for r in range(r1, r2 + 1):
+            for c in range(c1, c2 + 1):
+                ws.cell(r, c).border = b
+
+    def merge(addr, value="", bold=False, size=11,
+              ha="center", va="center", fill=None):
+        """Merge a range, write value to anchor, apply borders to all cells."""
+        ws.merge_cells(addr)
+        # parse addr like "B3:E3"
+        from openpyxl.utils.cell import range_boundaries
+        min_c, min_r, max_c, max_r = range_boundaries(addr)
+        c = sc(min_r, min_c, value, bold=bold, size=size, ha=ha, va=va, fill=fill)
+        fill_border(min_r, min_c, max_r, max_c)
+        return c
+
+    # ── 列宽（10列）──
+    # A=序号 B=尺寸 C=公差 D-H=实测1-5 I=OK J=NO
+    widths = [7, 14, 11, 10, 10, 10, 10, 10, 7, 7]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    # ━━ R1: 大标题 ━━
+    ws.row_dimensions[1].height = 36
+    merge("A1:J1", "林海日常检验记录", bold=True, size=18)
+    ws.cell(1, 1).border = Border()   # 标题行不要边框
+
+    # ━━ R2: LHJQ / 样品 / 批量 / 日期（无边框，辅助信息行）━━
+    ws.row_dimensions[2].height = 18
+    sc(2, 1, "LHJQ", bold=True, size=10, ha="left")
+    ws.merge_cells("B2:D2");  ws.cell(2, 2).value = f"样品: {sample}"
+    ws.cell(2, 2).font = Font(name=SONG, size=10)
+    ws.cell(2, 2).alignment = Alignment(horizontal="left", vertical="center")
+    ws.merge_cells("E2:G2");  ws.cell(2, 5).value = f"批量: {batch}"
+    ws.cell(2, 5).font = Font(name=SONG, size=10)
+    ws.cell(2, 5).alignment = Alignment(horizontal="left", vertical="center")
+    ws.merge_cells("H2:J2");  ws.cell(2, 8).value = f"日期: {date}"
+    ws.cell(2, 8).font = Font(name=SONG, size=10)
+    ws.cell(2, 8).alignment = Alignment(horizontal="left", vertical="center")
+
+    # ━━ R3: 名称 / 图号 ━━
+    ws.row_dimensions[3].height = 24
+    sc(3, 1, "名称", bold=True, size=11, fill=HDR_FILL)
+    fill_border(3, 1, 3, 1)
+    merge("B3:E3", name, size=11)
+    sc(3, 6, "图号", bold=True, size=11, fill=HDR_FILL)
+    fill_border(3, 6, 3, 6)
+    merge("G3:J3", drawing, size=11)
+
+    # ━━ R4: 材质 / 数量 ━━
+    ws.row_dimensions[4].height = 24
+    sc(4, 1, "材质", bold=True, size=11, fill=HDR_FILL)
+    fill_border(4, 1, 4, 1)
+    merge("B4:E4", material, size=11)
+    sc(4, 6, "数量", bold=True, size=11, fill=HDR_FILL)
+    fill_border(4, 6, 4, 6)
+    merge("G4:I4", quantity, size=11)
+    sc(4, 10, "件", size=11)
+    fill_border(4, 10, 4, 10)
+
+    # ━━ R5-R6: 数据表头（双行合并）━━
+    ws.row_dimensions[5].height = 22
+    ws.row_dimensions[6].height = 18
+    # 序号/尺寸/公差/OK/NO 跨两行
+    for col, label in [(1,"序号"),(2,"尺寸"),(3,"公差"),(9,"OK"),(10,"NO")]:
+        addr = f"{get_column_letter(col)}5:{get_column_letter(col)}6"
+        merge(addr, label, bold=True, size=11, fill=HDR_FILL)
+    # 实测尺寸 横向合并
+    merge("D5:H5", "实测尺寸", bold=True, size=11, fill=HDR_FILL)
+    # 实测子列 1-5
+    for i, sub in enumerate(["1","2","3","4","5"], 4):
+        sc(6, i, sub, bold=True, size=10, fill=HDR_FILL)
+        fill_border(6, i, 6, i)
+
+    # ━━ R7+: 数据行 ━━
+    for idx, ann in enumerate(annotations):
+        r = 7 + idx
+        ws.row_dimensions[r].height = 20
+        # 公差格式化
+        u = str(ann.get("upper_tol", "")).strip()
+        l = str(ann.get("lower_tol", "")).strip()
+        if u and l:
+            try:
+                if abs(float(u)) == abs(float(l)):
+                    tol = f"±{abs(float(u))}"
+                else:
+                    tol = f"{u}/{l}"
+            except ValueError:
+                tol = f"{u}/{l}"
+        else:
+            tol = u or l or ""
+        vals = [ann.get("num",""), ann.get("value",""), tol,
+                "", "", "", "", "", "", ""]
+        for c, v in enumerate(vals, 1):
+            sc(r, c, v, size=11)
+        fill_border(r, 1, r, 10)
+
+    # ━━ R(7+n): 表尾——检验员 / 审核 ━━
+    footer_row = 7 + len(annotations)
+    ws.row_dimensions[footer_row].height = 22
+    # 检验员：A-E
+    sc(footer_row, 1, "检验员：", bold=True, size=11, ha="right")
+    fill_border(footer_row, 1, footer_row, 1)
+    merge(f"B{footer_row}:E{footer_row}", inspector, size=11, ha="left")
+    # 审核：F-J
+    sc(footer_row, 6, "审  核：", bold=True, size=11, ha="right")
+    fill_border(footer_row, 6, footer_row, 6)
+    merge(f"G{footer_row}:J{footer_row}", reviewer, size=11, ha="left")
+
+    # ━━ 外框加粗 ━━
+    last_row = footer_row
+    # 整体表格区域（R3-last_row）加粗外框
+    for r in range(3, last_row + 1):
+        for c in range(1, 11):
+            cell = ws.cell(r, c)
+            b = cell.border
+            cell.border = Border(
+                left   = MEDIUM if c == 1  else b.left,
+                right  = MEDIUM if c == 10 else b.right,
+                top    = MEDIUM if r == 3  else b.top,
+                bottom = MEDIUM if r == last_row else b.bottom,
+            )
+
+    # ━━ 打印设置 ━━
+    total_rows = last_row
+    ws.print_area = f"A1:J{total_rows}"
+    ws.page_setup.orientation = "portrait"
+    ws.page_setup.paperSize   = 9      # A4
+    ws.page_setup.fitToPage   = True
+    ws.page_setup.fitToWidth  = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins = PageMargins(left=0.59, right=0.59, top=0.79, bottom=0.79,
+                                   header=0.31, footer=0.31)
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"林海日常检验记录_{date}.xlsx"
+    return send_file(
+        buf,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=filename
+    )
 
 
 @app.route("/health")

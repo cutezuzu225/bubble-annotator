@@ -266,3 +266,16 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
 #style-overlay .form-row label { flex-direction: row; align-items: center; justify-content: space-between; }
 #style-overlay input[type="range"] { width: 140px; accent-color: var(--accent); }
 #style-overlay input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
+
+/* 导出弹窗 AI 提示 */
+.exp-ai-hint {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--accent);
+  background: rgba(82,139,255,.1); border-radius: 6px;
+  padding: 6px 10px; margin-bottom: 10px;
+}
+.exp-ai-spinner {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--accent); border-top-color: transparent;
+  animation: spin .7s linear infinite; flex-shrink: 0;
+}
