@@ -17,7 +17,7 @@ SSH="ssh -i ${KEY} -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST}"
 SCP="scp -i ${KEY} -o StrictHostKeyChecking=no"
 
 echo "==> Building and pushing image: ${IMAGE_TAG}"
-sudo docker buildx build --platform linux/amd64 -t "${IMAGE_TAG}" . --push
+docker buildx build --platform linux/amd64 -t "${IMAGE_TAG}" . --push
 
 echo "==> Removing running container and old images on remote"
 ${SSH} bash <<EOF
