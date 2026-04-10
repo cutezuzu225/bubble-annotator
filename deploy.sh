@@ -42,13 +42,24 @@ ${SSH} sudo mv /tmp/bubble-annotate.conf /etc/nginx/sites-available/bubble-anota
 
 echo "==> Uploading static frontend files"
 ${SSH} sudo mkdir -p /var/www/bubble
-${SCP} index.html "${REMOTE_USER}@${REMOTE_HOST}:/tmp/index.html"
-${SCP} app.js     "${REMOTE_USER}@${REMOTE_HOST}:/tmp/app.js"
-${SCP} styles.css "${REMOTE_USER}@${REMOTE_HOST}:/tmp/styles.css"
+
+# Resolve hashed filenames from the local repo
+APP_JS=$(ls app-*.js)
+STYLES_CSS=$(ls styles-*.css)
+
+# Clear all old static files so stale hashed versions don't accumulate
 ${SSH} bash <<EOF
-  sudo mv /tmp/index.html  /var/www/bubble/index.html
-  sudo mv /tmp/app.js      /var/www/bubble/app.js
-  sudo mv /tmp/styles.css  /var/www/bubble/styles.css
+  sudo find /var/www/bubble -maxdepth 1 \( -name "*.html" -o -name "*.js" -o -name "*.css" \) -delete
+EOF
+
+# Upload hashed assets + index.html
+${SCP} index.html               "${REMOTE_USER}@${REMOTE_HOST}:/tmp/index.html"
+${SCP} "${APP_JS}"              "${REMOTE_USER}@${REMOTE_HOST}:/tmp/${APP_JS}"
+${SCP} "${STYLES_CSS}"          "${REMOTE_USER}@${REMOTE_HOST}:/tmp/${STYLES_CSS}"
+${SSH} bash <<EOF
+  sudo mv /tmp/index.html       /var/www/bubble/index.html
+  sudo mv /tmp/${APP_JS}        /var/www/bubble/${APP_JS}
+  sudo mv /tmp/${STYLES_CSS}    /var/www/bubble/${STYLES_CSS}
 EOF
 
 echo "==> Reloading nginx"
