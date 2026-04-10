@@ -630,6 +630,19 @@ async function doExportExcel() {
   const reviewer  = $('exp-reviewer').value.trim();
   const date      = $('exp-date').value || new Date().toISOString().slice(0, 10);
 
+  // 必填校验
+  const missing = [];
+  if (!name)      missing.push('名称');
+  if (!drawing)   missing.push('图号');
+  if (!material)  missing.push('材质');
+  if (!quantity)  missing.push('数量');
+  if (!sample && !batch) missing.push('样品或批次号（至少填一项）');
+  if (!inspector) missing.push('检验员');
+  if (missing.length) {
+    alert('以下必填项未填写：\n• ' + missing.join('\n• '));
+    return;
+  }
+
   $('export-overlay').hidden = true;
   const btn = $('export-confirm');
   btn.disabled = true;
